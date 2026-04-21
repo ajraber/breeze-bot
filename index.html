@@ -216,8 +216,9 @@
 // ============================================================
 // CONFIG - Update these after deploying your Cloudflare Worker
 // ============================================================
-const MONDAY_WORKER_URL = 'https://breezebot.aj-5ac.workers.dev';
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const WORKER_URL = 'https://breezebot.aj-5ac.workers.dev';
+const MONDAY_WORKER_URL = WORKER_URL + '/monday';
+const ANTHROPIC_API = WORKER_URL + '/anthropic';
 const MONDAY_BOARD_ID = 18393976260;
 
 // ============================================================
