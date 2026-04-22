@@ -476,15 +476,22 @@ function loadProps() {
 
 function getDetails(prop) {
   if (cache[prop.id]) return Promise.resolve(cache[prop.id]);
-  var idsStr = ALL_IDS.map(function(i) { return '"' + i + '"'; }).join(',');
+
   var nonRelationIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') === -1; });
   var relationIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') !== -1; });
   var nonRelStr = nonRelationIds.map(function(i) { return '"' + i + '"'; }).join(',');
   var relStr = relationIds.map(function(i) { return '"' + i + '"'; }).join(',');
   var q = '{ items(ids:[' + prop.id + ']) { id name column_values(ids:[' + nonRelStr + ']) { id type text value } board_relation: column_values(ids:[' + relStr + ']) { id type text value ... on BoardRelationValue { linked_items { id name } } } } }';
+
   return mq(q).then(function(d) {
     var item = d.items[0];
-    var ctx = 'Property: ' + item.name + '\n';
+    var ctx = 'Property: ' + item.name + '
+';
+
+    // Collect linked item IDs by board for contact lookup
+    var ownerIds = [];
+    var contractorIds = [];
+
     var allCols = (item.column_values || []).concat(item.board_relation || []);
     allCols.forEach(function(col) {
       var val = col.text;
@@ -495,17 +502,67 @@ function getDetails(prop) {
         try {
           if (col.linked_items && col.linked_items.length > 0) {
             val = col.linked_items.map(function(l) { return l.name || ''; }).filter(Boolean).join(', ');
+            // Collect IDs for contact enrichment
+            col.linked_items.forEach(function(l) {
+              if (col.id === 'board_relation_mkza3601') ownerIds.push(l.id);
+              else contractorIds.push(l.id);
+            });
           } else if (col.text && col.text.trim()) {
             val = col.text;
-          } else {
-            val = '';
-          }
+          } else { val = ''; }
         } catch(e) {}
       }
-      if (val && val.trim() && COL[col.id]) ctx += COL[col.id] + ': ' + val + '\n';
+      if (val && val.trim() && COL[col.id]) ctx += COL[col.id] + ': ' + val + '
+';
     });
-    cache[prop.id] = ctx;
-    return ctx;
+
+    // Fetch contact details from Owners and Contractor boards in parallel
+    var promises = [];
+
+    if (ownerIds.length > 0) {
+      var ownerQ = '{ items(ids:[' + ownerIds.join(',') + ']) { name column_values(ids:["email_mkz4x08v","phone_mkz48h6n","text_mkz4qbvr","text_mkz4y0y9","phone_mm15r964","email_mkzdvsyb","color_mm1551ca"]) { id type text } } }';
+      promises.push(mq(ownerQ).then(function(d) {
+        if (!d.items) return;
+        d.items.forEach(function(owner) {
+          ctx += '
+--- Owner: ' + owner.name + ' ---
+';
+          var ownerColMap = {'email_mkz4x08v':'Email','phone_mkz48h6n':'Phone','text_mkz4qbvr':'Company','text_mkz4y0y9':'Address','phone_mm15r964':'Secondary Phone','email_mkzdvsyb':'Secondary Email','color_mm1551ca':'Commission %'};
+          owner.column_values.forEach(function(c) {
+            if (c.text && c.text.trim() && ownerColMap[c.id]) {
+              ctx += ownerColMap[c.id] + ': ' + c.text + '
+';
+            }
+          });
+        });
+      }).catch(function() {}));
+    }
+
+    if (contractorIds.length > 0) {
+      // Deduplicate
+      var uniqueIds = contractorIds.filter(function(id, i) { return contractorIds.indexOf(id) === i; });
+      var conQ = '{ items(ids:[' + uniqueIds.join(',') + ']) { name column_values(ids:["phone_mm0zzms2","email_mm0zcevg","text_mm0zgeqm","color_mm1325pz","long_text_mm0z1pnm"]) { id type text } } }';
+      promises.push(mq(conQ).then(function(d) {
+        if (!d.items) return;
+        d.items.forEach(function(con) {
+          ctx += '
+--- Contractor: ' + con.name + ' ---
+';
+          var conColMap = {'phone_mm0zzms2':'Phone','email_mm0zcevg':'Email','text_mm0zgeqm':'Company','color_mm1325pz':'Trade','long_text_mm0z1pnm':'Notes'};
+          con.column_values.forEach(function(c) {
+            if (c.text && c.text.trim() && conColMap[c.id]) {
+              ctx += conColMap[c.id] + ': ' + c.text + '
+';
+            }
+          });
+        });
+      }).catch(function() {}));
+    }
+
+    return Promise.all(promises).then(function() {
+      cache[prop.id] = ctx;
+      return ctx;
+    });
   });
 }
 
