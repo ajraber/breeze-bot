@@ -98,7 +98,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
       <div class="example" id="ex1"><div class="ex-label">Try this</div>Door code for Bethany Beach Breakaway</div>
       <div class="example" id="ex2"><div class="ex-label">Try this</div>WiFi at Adventure Oak Lodge</div>
       <div class="example" id="ex3"><div class="ex-label">Try this</div>Which FL properties have a pool?</div>
-      <div class="example" id="ex4"><div class="ex-label">Try this</div>Maintenance contact for Aloha Skies</div>
+      <div class="example" id="ex4"><div class="ex-label">Try this</div>Who owns Aloha Skies?</div>
     </div>
   </div>
 </div>
@@ -111,31 +111,158 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 </div>
 <script>
 var WORKER_URL = 'https://breezebot.aj-5ac.workers.dev';
+var SOP_URL = 'https://script.google.com/macros/s/AKfycbwA0Tn0q12tv0eN-zOdSMHCD7nhwCfEXEGdkgsne_UOaQKAsm0PoFw0EfXVZguExGmJdA/exec';
 var BOARD_ID = 18393976260;
 var allProps = [];
 var cache = {};
 var hist = [];
 var busy = false;
+var sopContent = '';
 
 var COL = {
-  'location':'Address','color_mkze9061':'Renting Status','door_code':'Guest Door Code',
-  'text_mkzkb8hq':'Master Door Code','cleaner_code':'Cleaner Door Code','text':'Backup Keys/Lockbox',
-  'text_mm0zm9gs':'E-Bike Codes','text_mm0z7wh8':'Gate Codes','wifi_network':'WiFi Network',
-  'wifi_password':'WiFi Password','text_mkzmc3kh':'Router Location','numeric_mkzkv2gh':'Max Occupancy',
-  'numeric_mkzkk6yb':'Bedrooms','numeric_mkzkacb7':'Bathrooms','text_mkzm2sqe':'Bedroom Breakdown',
-  'text_mky7b857':'Maintenance Contact','phone_mky71s82':'Maintenance Phone',
-  'long_text_mkzmjy9c':'Other Maintenance Contacts','trash_day':'Trash Day',
-  'text_mkzm27t7':'Trash Provider','dropdown_mkza5v9v':'Trash Management',
-  'dropdown_mkza6jgp':'Pest Control','dropdown_mkzmmfpw':'Pool','dropdown_mkzmjf23':'Pool Heated',
-  'text40':'Pool Service Schedule','text76':'Pool Service Contact','phone_mky2jd9p':'Pool Service Phone',
-  'dropdown_mkzmzrtk':'Hot Tub','text_mkzmsph':'Hot Tub Cleaner','dropdown_mkzaf4r':'Pets Allowed',
-  'text_mm0z2n0j':'Parking Spaces','text_mm026fme':'Beach Gear','text_mkzmrs6q':'Grill Type',
-  'phone_mkzmmkv6':'Emergency Contacts','long_text_mkzmvj3c':'Garage Access',
-  'long_text_mkzmh363':'Thermostat Info','long_text_mkzmmyz4':'TV/Streaming Setup',
-  'long_text_mkzmmn3':'House Rules','long_text_mkzmtvq8':'Checkout Instructions',
-  'listing_link':'Airbnb Listing','text27':'VRBO Listing',
-  'dropdown_mm09fa5z':'State','color_mm0z324':'Region'
+  'location': 'Address',
+  'color_mkze9061': 'Renting Status',
+  'dropdown_mm09fa5z': 'State',
+  'color_mm0z324': 'Region',
+  'dropdown_mkzaapc0': 'Municipality',
+  'board_relation_mkza3601': 'Owner',
+  'link_mkzkzfw0': 'BNB Breeze Website',
+  'listing_link': 'Airbnb Listing Link',
+  'text27': 'VRBO Listing Link',
+  'link_mkzasdy0': 'Property Doc Link',
+  'link_mkzarq5h': 'Property Photos Link',
+  'door_code': 'Guest Door Code',
+  'color_mm00z8xy': 'Remote Lock',
+  'text_mkzkb8hq': 'Master Door Code',
+  'text': 'Backup Keys/Lockbox',
+  'text_mm0zm9gs': 'E-Bike Codes',
+  'text_mm0z7wh8': 'Gate Codes',
+  'text_mm00g63k': 'Door Lock Make/Model',
+  'text_mkxwzwwt': 'Keypad Programming Code',
+  'text_mkxw25w3': 'Supply Closet Code/Key Location',
+  'cleaner_code': 'Cleaner Door Code',
+  'dropdown_mkzaf4r': 'Pets Allowed',
+  'dropdown_mkza71kv': 'Sunday Check-in',
+  'wifi_network': 'WiFi Network',
+  'wifi_password': 'WiFi Password',
+  'text_mkzmc3kh': 'Router Location',
+  'numeric_mkzkv2gh': 'Max Occupancy',
+  'numeric_mkzkk6yb': 'Bedrooms',
+  'numeric_mkzkacb7': 'Bathrooms',
+  'text_mkzm2sqe': 'Bedroom Breakdown',
+  'text_mm0z7qjz': 'Bathroom Locations',
+  'text_mm0z2n0j': 'Parking Spaces',
+  'text_mm0zcjzk': 'Coffee Maker',
+  'text_mm026fme': 'Beach Gear',
+  'text_mkzmrs6q': 'Grill Type',
+  'color_mm13vhcm': 'Firewood Provided',
+  'text_mm138ppy': 'Firewood Location',
+  'dropdown_mkzmkqh0': 'GAK Kit',
+  'text_mky7b857': 'Maintenance Contact',
+  'phone_mky71s82': 'Maintenance Phone',
+  'board_relation_mm1bkkr7': 'Maintenance Contact (Vendor)',
+  'board_relation_mm1b84np': 'HVAC',
+  'board_relation_mm1bkx1h': 'Plumber',
+  'board_relation_mm1bdmtb': 'Electrician',
+  'board_relation_mm1bh62g': 'Snow Removal',
+  'long_text_mkzmjy9c': 'Other Maintenance Contacts',
+  'long_text_mkzm9htf': 'Maintenance Notes',
+  'text_mkxwnes1': 'Biannual Maintenance Inspection',
+  'ac_filter_sizes__1': 'AC Filter Sizes',
+  'date': 'Date Filters Changed',
+  'phone_mkzmmkv6': 'Emergency Contacts',
+  'trash_day': 'Trash Day',
+  'text_mkzm27t7': 'Trash Provider',
+  'dropdown_mkza5v9v': 'Trash Management',
+  'dropdown_mkza6jgp': 'Pest Control',
+  'board_relation_mm1bqjek': 'Pest Control (Vendor)',
+  'dropdown_mkzmmfpw': 'Pool',
+  'dropdown_mkzmjf23': 'Pool Heated',
+  'text40': 'Pool Service Schedule',
+  'text76': 'Pool Service Contact',
+  'phone_mky2jd9p': 'Pool Service Phone',
+  'board_relation_mm1bnc08': 'Pool Service (Vendor)',
+  'text_mm0np7rf': 'Pool Dimension',
+  'text_mm0n7ce7': 'Pool Depth',
+  'numeric_mm1tz0m8': 'Pool Service BNB Cost',
+  'numeric_mm1tpfyn': 'Pool Service HO Price',
+  'dropdown_mkzmzrtk': 'Hot Tub',
+  'text_mkzmsph': 'Hot Tub Cleaner Contact',
+  'board_relation_mm1b8chj': 'Hot Tub Cleaner (Vendor)',
+  'text410': 'Lawncare Provider',
+  'text__1': 'Lawncare Service Schedule',
+  'phone_mky2x1y9': 'Lawncare Phone',
+  'board_relation_mm1bmvee': 'Lawn Care (Vendor)',
+  'numeric_mm1tq99x': 'Lawncare BNB Cost',
+  'numeric_mm1txaf6': 'Lawncare HO Price',
+  'board_relation_mm15g8jj': 'Cleaner Contact (Vendor)',
+  'numeric_mkzeffjg': 'Cleaners Price',
+  'numeric_mm0dp3da': 'Cleaning Upcharge for Trash',
+  'numeric_mm0dj8pt': 'Cleaning Price to Guest',
+  'color_mm0ddwde': 'Cleaning Fee Payable To',
+  'color_mm0d89fd': 'Cleaning Fee Type',
+  'text_mkzeg65z': 'Cleaning Fee Changes',
+  'text07': 'Biannual Deep Clean Date/Cleaner',
+  'long_text_mkzmvj3c': 'Garage Access',
+  'long_text_mkzmh363': 'How to Use Thermostat',
+  'long_text_mkzmmyz4': 'TV/Streaming Setup',
+  'long_text_mkzmmn3': 'House Rules',
+  'long_text_mkzmwm72': 'Things to Do',
+  'long_text_mkzmtvq8': 'Checkout Instructions',
+  'text_mkzmyqzq': 'Evacuation Zone',
+  'text_mkzmva6n': 'Fire Extinguisher Location',
+  'text_mkzmynte': 'First Aid Kit Location',
+  'text_mkzmxhct': 'Breaker Box Location',
+  'long_text_mkzmj436': 'Camera Locations',
+  'text_mkzmgg0n': 'Owner Storage Location',
+  'text_mkzm2j8': 'Linen Storage Location',
+  'long_text_mkzmjg2b': 'Consumables Restock Notes',
+  'login_email': 'Airbnb Login Email',
+  'login_password': 'Airbnb Login Password',
+  'numeric_mm072xmy': 'Commission %',
+  'numeric_mm02q2h4': 'Property Value',
+  'dropdown_mm07km5e': 'Origin',
+  'text_mm1j1q79': '1099 Recipient'
 };
+
+var ALL_IDS = [
+  'location','color_mkze9061','dropdown_mm09fa5z','color_mm0z324','dropdown_mkzaapc0',
+  'board_relation_mkza3601','link_mkzkzfw0','listing_link','text27','link_mkzasdy0','link_mkzarq5h',
+  'door_code','color_mm00z8xy','text_mkzkb8hq','text','text_mm0zm9gs','text_mm0z7wh8',
+  'text_mm00g63k','text_mkxwzwwt','text_mkxw25w3','cleaner_code',
+  'dropdown_mkzaf4r','dropdown_mkza71kv','wifi_network','wifi_password','text_mkzmc3kh',
+  'numeric_mkzkv2gh','numeric_mkzkk6yb','numeric_mkzkacb7','text_mkzm2sqe','text_mm0z7qjz',
+  'text_mm0z2n0j','text_mm0zcjzk','text_mm026fme','text_mkzmrs6q','color_mm13vhcm','text_mm138ppy','dropdown_mkzmkqh0',
+  'text_mky7b857','phone_mky71s82','board_relation_mm1bkkr7','board_relation_mm1b84np',
+  'board_relation_mm1bkx1h','board_relation_mm1bdmtb','board_relation_mm1bh62g',
+  'long_text_mkzmjy9c','long_text_mkzm9htf','text_mkxwnes1','ac_filter_sizes__1','date','phone_mkzmmkv6',
+  'trash_day','text_mkzm27t7','dropdown_mkza5v9v','dropdown_mkza6jgp','board_relation_mm1bqjek',
+  'dropdown_mkzmmfpw','dropdown_mkzmjf23','text40','text76','phone_mky2jd9p','board_relation_mm1bnc08',
+  'text_mm0np7rf','text_mm0n7ce7','numeric_mm1tz0m8','numeric_mm1tpfyn',
+  'dropdown_mkzmzrtk','text_mkzmsph','board_relation_mm1b8chj',
+  'text410','text__1','phone_mky2x1y9','board_relation_mm1bmvee','numeric_mm1tq99x','numeric_mm1txaf6',
+  'board_relation_mm15g8jj','numeric_mkzeffjg','numeric_mm0dp3da','numeric_mm0dj8pt',
+  'color_mm0ddwde','color_mm0d89fd','text_mkzeg65z','text07',
+  'long_text_mkzmvj3c','long_text_mkzmh363','long_text_mkzmmyz4','long_text_mkzmmn3',
+  'long_text_mkzmwm72','long_text_mkzmtvq8','text_mkzmyqzq','text_mkzmva6n',
+  'text_mkzmynte','text_mkzmxhct','long_text_mkzmj436','text_mkzmgg0n','text_mkzm2j8',
+  'long_text_mkzmjg2b','login_email','login_password',
+  'numeric_mm072xmy','numeric_mm02q2h4','dropdown_mm07km5e','text_mm1j1q79'
+];
+
+function loadSOP() {
+  return fetch(SOP_URL)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.success) {
+        sopContent = d.content;
+        console.log('SOP loaded: ' + sopContent.length + ' chars');
+      }
+    })
+    .catch(function(e) {
+      console.error('SOP load failed:', e);
+    });
+}
 
 function mq(query) {
   return fetch(WORKER_URL + '/monday', {
@@ -177,16 +304,7 @@ function loadProps() {
 
 function getDetails(prop) {
   if (cache[prop.id]) return Promise.resolve(cache[prop.id]);
-  var ids = ['location','color_mkze9061','door_code','text_mkzkb8hq','cleaner_code','text',
-    'text_mm0zm9gs','text_mm0z7wh8','wifi_network','wifi_password','text_mkzmc3kh',
-    'numeric_mkzkv2gh','numeric_mkzkk6yb','numeric_mkzkacb7','text_mkzm2sqe',
-    'text_mky7b857','phone_mky71s82','long_text_mkzmjy9c','trash_day','text_mkzm27t7',
-    'dropdown_mkza5v9v','dropdown_mkza6jgp','dropdown_mkzmmfpw','dropdown_mkzmjf23',
-    'text40','text76','phone_mky2jd9p','dropdown_mkzmzrtk','text_mkzmsph',
-    'dropdown_mkzaf4r','text_mm0z2n0j','text_mm026fme','text_mkzmrs6q','phone_mkzmmkv6',
-    'long_text_mkzmvj3c','long_text_mkzmh363','long_text_mkzmmyz4','long_text_mkzmmn3',
-    'long_text_mkzmtvq8','listing_link','text27','dropdown_mm09fa5z','color_mm0z324'];
-  var idsStr = ids.map(function(i) { return '"' + i + '"'; }).join(',');
+  var idsStr = ALL_IDS.map(function(i) { return '"' + i + '"'; }).join(',');
   var q = '{ items(ids:[' + prop.id + ']) { id name column_values(ids:[' + idsStr + ']) { id type text value } } }';
   return mq(q).then(function(d) {
     var item = d.items[0];
@@ -195,6 +313,14 @@ function getDetails(prop) {
       var val = col.text;
       if (col.type === 'location' && col.value) {
         try { var loc = JSON.parse(col.value); val = loc.address || ''; } catch(e) {}
+      }
+      if (col.type === 'board_relation' && col.value) {
+        try {
+          var linked = JSON.parse(col.value);
+          if (Array.isArray(linked) && linked.length > 0) {
+            val = linked.map(function(l) { return l.name || ''; }).filter(Boolean).join(', ');
+          }
+        } catch(e) {}
       }
       if (val && val.trim() && COL[col.id]) ctx += COL[col.id] + ': ' + val + '\n';
     });
@@ -205,12 +331,28 @@ function getDetails(prop) {
 
 function askClaude(msg, propCtx) {
   var portfolio = allProps.map(function(p) { return p.name + ' (' + p.status + ', ' + p.state + ')'; }).join('\n');
-  var sys = 'You are Breeze Bot, internal assistant for BNB Breeze with ' + allProps.length + ' properties. Answer ONLY what was asked. Be brief. Bold key values with **value**.' + (propCtx ? '\n\nPROPERTY DATA:\n' + propCtx : '') + '\n\nALL PROPERTIES:\n' + portfolio;
+
+  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental property management company with ' + allProps.length + ' properties.\n\n';
+
+  sys += 'YOUR IDENTITY:\nYou are deeply trained on BNB Breeze company policies, procedures, and operations. Every response you give is filtered through the BNB Breeze SOP. When answering any question — whether about a property, a process, a policy, or a situation — you think like a BNB Breeze team member who knows the SOP inside and out. You never give generic answers when a company-specific policy exists.\n\n';
+
+  sys += 'RESPONSE RULES:\n- Answer ONLY what was asked. Be brief and direct.\n- Bold key values with **value**.\n- When SOP policy is relevant to a question, apply it. Do not ignore policy even if the question seems purely operational.\n- If a question involves a process (cancellation, pet request, alteration, etc.), follow the SOP procedure.\n- Property data from Monday takes precedence for property-specific facts (codes, contacts, addresses).\n- SOP takes precedence for policies, procedures, and company rules.\n\n';
+
+  if (propCtx) {
+    sys += '--- SELECTED PROPERTY ---\n' + propCtx + '\n---\n\n';
+  }
+
+  if (sopContent) {
+    sys += '--- BNB BREEZE SOP & COMPANY POLICIES ---\n' + sopContent + '\n---\n\n';
+  }
+
+  sys += '--- ALL PROPERTIES ---\n' + portfolio + '\n---';
+
   hist.push({role: 'user', content: msg});
   return fetch(WORKER_URL + '/anthropic', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({model: 'claude-haiku-4-5-20251001', max_tokens: 600, system: sys, messages: hist})
+    body: JSON.stringify({model: 'claude-haiku-4-5-20251001', max_tokens: 800, system: sys, messages: hist})
   }).then(function(r) {
     if (!r.ok) throw new Error('Claude error ' + r.status);
     return r.json();
@@ -333,37 +475,33 @@ function quickAsk(topic) {
   }
 }
 
-document.getElementById('sendBtn').addEventListener('click', function() {
-  send(document.getElementById('chatInput').value.trim());
-});
-document.getElementById('chatInput').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(this.value.trim()); }
-});
-document.getElementById('chatInput').addEventListener('input', function() {
-  this.style.height = 'auto';
-  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-});
-document.getElementById('clearBtn').addEventListener('click', function() {
-  hist = [];
-  document.getElementById('chatArea').innerHTML = '';
-  addMsg('bot', 'Chat cleared. Ask about any property.');
-});
-document.getElementById('qa1').addEventListener('click', function() { quickAsk('guest door code, master door code, and any gate or e-bike codes'); });
+document.getElementById('sendBtn').addEventListener('click', function() { send(document.getElementById('chatInput').value.trim()); });
+document.getElementById('chatInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(this.value.trim()); } });
+document.getElementById('chatInput').addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
+document.getElementById('clearBtn').addEventListener('click', function() { hist = []; document.getElementById('chatArea').innerHTML = ''; addMsg('bot', 'Chat cleared. Ask about any property or policy.'); });
+document.getElementById('qa1').addEventListener('click', function() { quickAsk('guest door code, master door code, gate codes, and e-bike codes'); });
 document.getElementById('qa2').addEventListener('click', function() { quickAsk('WiFi network name and password'); });
 document.getElementById('qa3').addEventListener('click', function() { quickAsk('full property address'); });
-document.getElementById('qa4').addEventListener('click', function() { quickAsk('maintenance contact and phone number'); });
-document.getElementById('qa5').addEventListener('click', function() { quickAsk('cleaner contact and cleaner door code'); });
-document.getElementById('qa6').addEventListener('click', function() { quickAsk('pool and hot tub details'); });
-document.getElementById('qa7').addEventListener('click', function() { quickAsk('trash day, provider, and who manages it'); });
+document.getElementById('qa4').addEventListener('click', function() { quickAsk('all maintenance contacts, phone numbers, HVAC, plumber, electrician, and snow removal vendors'); });
+document.getElementById('qa5').addEventListener('click', function() { quickAsk('cleaner contact, cleaner door code, cleaning price, and cleaning fee type'); });
+document.getElementById('qa6').addEventListener('click', function() { quickAsk('pool type, heated status, dimensions, service schedule, contact, and hot tub details'); });
+document.getElementById('qa7').addEventListener('click', function() { quickAsk('trash day, provider, and who manages trash'); });
 document.getElementById('qa8').addEventListener('click', function() { quickAsk('pet policy and parking spaces'); });
-document.getElementById('qa9').addEventListener('click', function() { quickAsk('full property summary with all key operational details'); });
+document.getElementById('qa9').addEventListener('click', function() { quickAsk('full property summary with all available information'); });
 document.getElementById('ex1').addEventListener('click', function() { send('Door code for Bethany Beach Breakaway'); });
 document.getElementById('ex2').addEventListener('click', function() { send('WiFi at Adventure Oak Lodge'); });
 document.getElementById('ex3').addEventListener('click', function() { send('Which FL properties have a pool?'); });
-document.getElementById('ex4').addEventListener('click', function() { send('Maintenance contact for Aloha Skies'); });
+document.getElementById('ex4').addEventListener('click', function() { send('Who owns Aloha Skies?'); });
 
+// Load everything in parallel on page open
 document.getElementById('statusDot').style.background = '#f59e0b';
-loadProps().catch(function(e) {
+Promise.all([
+  loadProps(),
+  loadSOP()
+]).then(function() {
+  document.getElementById('statusDot').style.background = '#10b981';
+  document.getElementById('statusDot').style.boxShadow = '0 0 6px #10b981';
+}).catch(function(e) {
   document.getElementById('statusDot').style.background = '#ef4444';
   document.getElementById('statusText').textContent = 'Connection error';
   console.error(e);
