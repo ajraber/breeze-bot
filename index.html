@@ -61,6 +61,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .send-btn:hover{opacity:0.85;}
 .send-btn:disabled{background:var(--surface3);color:var(--text3);cursor:not-allowed;}
 .hint{font-size:11px;color:var(--text3);text-align:center;margin-top:8px;font-family:'DM Mono',monospace;max-width:800px;margin-left:auto;margin-right:auto;}
+.suggestions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.suggestion-btn{padding:7px 14px;background:var(--surface2);border:1px solid var(--accent-border);border-radius:20px;color:var(--accent);font-size:13px;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all 0.15s;}
+.suggestion-btn:hover{background:var(--accent-dim);border-color:var(--accent);}
 
 .pin-overlay {
   position: fixed;
@@ -472,20 +475,28 @@ function loadProps() {
 function getDetails(prop) {
   if (cache[prop.id]) return Promise.resolve(cache[prop.id]);
   var idsStr = ALL_IDS.map(function(i) { return '"' + i + '"'; }).join(',');
-  var q = '{ items(ids:[' + prop.id + ']) { id name column_values(ids:[' + idsStr + ']) { id type text value } } }';
+  var nonRelationIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') === -1; });
+  var relationIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') !== -1; });
+  var nonRelStr = nonRelationIds.map(function(i) { return '"' + i + '"'; }).join(',');
+  var relStr = relationIds.map(function(i) { return '"' + i + '"'; }).join(',');
+  var q = '{ items(ids:[' + prop.id + ']) { id name column_values(ids:[' + nonRelStr + ']) { id type text value } board_relation: column_values(ids:[' + relStr + ']) { id type text value ... on BoardRelationValue { linked_items { id name } } } } }';
   return mq(q).then(function(d) {
     var item = d.items[0];
     var ctx = 'Property: ' + item.name + '\n';
-    item.column_values.forEach(function(col) {
+    var allCols = (item.column_values || []).concat(item.board_relation || []);
+    allCols.forEach(function(col) {
       var val = col.text;
       if (col.type === 'location' && col.value) {
         try { var loc = JSON.parse(col.value); val = loc.address || ''; } catch(e) {}
       }
-      if (col.type === 'board_relation' && col.value) {
+      if (col.type === 'board_relation') {
         try {
-          var linked = JSON.parse(col.value);
-          if (Array.isArray(linked) && linked.length > 0) {
-            val = linked.map(function(l) { return l.name || ''; }).filter(Boolean).join(', ');
+          if (col.linked_items && col.linked_items.length > 0) {
+            val = col.linked_items.map(function(l) { return l.name || ''; }).filter(Boolean).join(', ');
+          } else if (col.text && col.text.trim()) {
+            val = col.text;
+          } else {
+            val = '';
           }
         } catch(e) {}
       }
@@ -531,14 +542,131 @@ function askClaude(msg, propCtx) {
   });
 }
 
-function findProp(text) {
-  var lower = text.toLowerCase();
-  var best = null, bestLen = 0;
-  allProps.forEach(function(p) {
-    var n = p.name.toLowerCase();
-    if (lower.indexOf(n) !== -1 && n.length > bestLen) { best = p; bestLen = n.length; }
+function showSuggestions(question, candidates, originalMsg, topic) {
+  var w = document.getElementById('welcomeScreen');
+  if (w) w.remove();
+  var chat = document.getElementById('chatArea');
+
+  var msg = document.createElement('div');
+  msg.className = 'message bot';
+
+  var av = document.createElement('div');
+  av.className = 'avatar bot';
+  var img = document.createElement('img');
+  img.src = logoSrc();
+  img.style.height = '16px';
+  av.appendChild(img);
+
+  var bub = document.createElement('div');
+  bub.className = 'bubble';
+
+  var p = document.createElement('p');
+  p.textContent = question;
+  bub.appendChild(p);
+
+  var sugs = document.createElement('div');
+  sugs.className = 'suggestions';
+
+  candidates.forEach(function(prop) {
+    var btn = document.createElement('button');
+    btn.className = 'suggestion-btn';
+    btn.textContent = prop.name;
+    btn.addEventListener('click', function() {
+      // Remove the suggestion message
+      msg.remove();
+      if (topic) {
+        send('For ' + prop.name + ': ' + topic);
+      } else if (originalMsg) {
+        // Re-send original message but force this property
+        addMsg('user', originalMsg);
+        showTyping();
+        busy = true;
+        document.getElementById('sendBtn').disabled = true;
+        getDetails(prop).then(function(ctx) {
+          return askClaude(originalMsg, ctx);
+        }).then(function(reply) {
+          removeTyping();
+          addMsg('bot', reply);
+        }).catch(function(e) {
+          removeTyping();
+          addMsg('bot', 'Error: ' + e.message);
+        }).then(function() {
+          busy = false;
+          document.getElementById('sendBtn').disabled = false;
+          document.getElementById('chatInput').focus();
+        });
+      }
+    });
+    sugs.appendChild(btn);
   });
-  return best;
+
+  bub.appendChild(sugs);
+  msg.appendChild(av);
+  msg.appendChild(bub);
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// Returns {match, candidates} where match is exact/confident prop or null,
+// and candidates is array of close props when uncertain
+function scoreMatch(query, propName) {
+  var q = query.toLowerCase().trim();
+  var n = propName.toLowerCase().trim();
+  // Exact substring match - high confidence
+  if (n.indexOf(q) !== -1 || q.indexOf(n) !== -1) return 100 + n.length;
+  // Word overlap score
+  var qWords = q.split(/\s+/).filter(function(w) { return w.length > 2; });
+  var nWords = n.split(/\s+/).filter(function(w) { return w.length > 2; });
+  var matches = 0;
+  qWords.forEach(function(qw) {
+    nWords.forEach(function(nw) {
+      if (nw.indexOf(qw) !== -1 || qw.indexOf(nw) !== -1) matches++;
+      else if (levenshtein(qw, nw) <= 2) matches += 0.5;
+    });
+  });
+  if (qWords.length === 0) return 0;
+  return (matches / Math.max(qWords.length, nWords.length)) * 80;
+}
+
+function levenshtein(a, b) {
+  var m = a.length, n = b.length;
+  var dp = [];
+  for (var i = 0; i <= m; i++) {
+    dp[i] = [i];
+    for (var j = 1; j <= n; j++) {
+      dp[i][j] = i === 0 ? j :
+        a[i-1] === b[j-1] ? dp[i-1][j-1] :
+        1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function findProp(text) {
+  // Strip common filler words that aren't part of property names
+  var q = text.toLowerCase()
+    .replace(/(what|is|the|for|at|about|tell|me|who|owns|door|code|wifi|address|maintenance|cleaner|pool|trash|pet|parking|summary|info|details|contact)/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+
+  if (!q || q.length < 3) return {match: null, candidates: []};
+
+  var scored = allProps.map(function(p) {
+    return {prop: p, score: scoreMatch(q, p.name)};
+  }).filter(function(s) { return s.score > 15; })
+    .sort(function(a, b) { return b.score - a.score; });
+
+  if (scored.length === 0) return {match: null, candidates: []};
+
+  var top = scored[0];
+  // High confidence - clear winner
+  if (top.score >= 80 || (scored.length >= 2 && top.score > scored[1].score * 1.5)) {
+    return {match: top.prop, candidates: []};
+  }
+  // Medium confidence - return top candidates for user to pick
+  if (top.score >= 30) {
+    return {match: null, candidates: scored.slice(0, 3).map(function(s) { return s.prop; })};
+  }
+  return {match: null, candidates: []};
 }
 
 function fmt(text) {
@@ -615,7 +743,16 @@ function send(text) {
   document.getElementById('sendBtn').disabled = true;
   addMsg('user', text);
   showTyping();
-  var prop = findProp(text);
+  var result = findProp(text);
+  if (result.candidates && result.candidates.length > 0) {
+    removeTyping();
+    showSuggestions('I found a few properties that might match. Which one did you mean?', result.candidates, text);
+    busy = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('chatInput').focus();
+    return;
+  }
+  var prop = result.match;
   var p = prop ? getDetails(prop) : Promise.resolve('');
   p.then(function(ctx) {
     return askClaude(text, ctx);
@@ -634,9 +771,11 @@ function send(text) {
 
 function quickAsk(topic) {
   var input = document.getElementById('chatInput').value.trim();
-  var prop = input ? findProp(input) : null;
-  if (prop) {
-    send('For ' + prop.name + ': ' + topic);
+  var result = input ? findProp(input) : {match: null, candidates: []};
+  if (result.match) {
+    send('For ' + result.match.name + ': ' + topic);
+  } else if (result.candidates && result.candidates.length > 0) {
+    showSuggestions('Which property did you mean?', result.candidates, null, topic);
   } else {
     addMsg('bot', 'Type a property name in the input box first, then tap a quick action.');
   }
