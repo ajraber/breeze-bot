@@ -491,16 +491,16 @@ function findProp(text) {
   if (scored.length === 0) return {match: null, candidates: []};
   var top = scored[0];
   // Only one result above threshold - use it
-  if (scored.length === 1 && top.score >= 30) return {match: top.prop, candidates: []};
+  if (scored.length === 1 && top.score >= 30) return {match: Object.assign({}, top.prop, {score: top.score}), candidates: []};
   // Clear winner - score >= 80 or significantly better than next
-  if (top.score >= 80) return {match: top.prop, candidates: []};
-  if (scored.length >= 2 && top.score > scored[1].score * 1.8) return {match: top.prop, candidates: []};
+  if (top.score >= 80) return {match: Object.assign({}, top.prop, {score: top.score}), candidates: []};
+  if (scored.length >= 2 && top.score > scored[1].score * 1.8) return {match: Object.assign({}, top.prop, {score: top.score}), candidates: []};
   // Multiple close results - show suggestions but only if scores are genuinely close
   if (top.score >= 40 && scored.length >= 2 && scored[1].score >= 25) {
     return {match: null, candidates: scored.slice(0, 3).map(function(s) { return s.prop; })};
   }
   // Single decent match, no real competition
-  if (top.score >= 30) return {match: top.prop, candidates: []};
+  if (top.score >= 30) return {match: Object.assign({}, top.prop, {score: top.score}), candidates: []};
   return {match: null, candidates: []};
 }
 
@@ -638,7 +638,19 @@ function send(text) {
   showTyping();
 
   var result = findProp(text);
-  if (result.candidates && result.candidates.length > 0) {
+
+  // Only switch property if there is a HIGH confidence new match (score >= 80)
+  // that is different from the current active property
+  var newProp = null;
+  if (result.match && result.match.score >= 80 && (!activeProp || result.match.id !== activeProp.id)) {
+    newProp = result.match;
+  } else if (!activeProp && result.match) {
+    // No active property yet — use whatever we found
+    newProp = result.match;
+  }
+
+  if (!activeProp && result.candidates && result.candidates.length > 0) {
+    // No active property and ambiguous — ask user to pick
     removeTyping();
     showSuggestions('I found a few properties that might match. Which one did you mean?', result.candidates, text);
     busy = false;
@@ -646,10 +658,12 @@ function send(text) {
     document.getElementById('chatInput').focus();
     return;
   }
-  if (result.match && (!activeProp || result.match.id !== activeProp.id)) {
-    activeProp = result.match;
+
+  if (newProp) {
+    activeProp = newProp;
     activePropCtx = '';
   }
+
   var contextProp = activeProp;
   var p = contextProp ? (activePropCtx ? Promise.resolve(activePropCtx) : getDetails(contextProp).then(function(ctx) { activePropCtx = ctx; return ctx; })) : Promise.resolve('');
   p.then(function(ctx) {
