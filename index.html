@@ -274,7 +274,8 @@ var COL = {
   'long_text_mkzmjg2b': 'Consumables Restock Notes', 'login_email': 'Airbnb Login Email',
   'login_password': 'Airbnb Login Password', 'numeric_mm072xmy': 'Commission %',
   'numeric_mm02q2h4': 'Property Value', 'dropdown_mm07km5e': 'Origin',
-  'text_mm1j1q79': '1099 Recipient'
+  'text_mm1j1q79': '1099 Recipient',
+  'text_mm2nkcmt': 'Streamline ID'
 };
 
 var ALL_IDS = [
@@ -300,7 +301,8 @@ var ALL_IDS = [
   'long_text_mkzmmn3','long_text_mkzmwm72','long_text_mkzmtvq8','text_mkzmyqzq',
   'text_mkzmva6n','text_mkzmynte','text_mkzmxhct','long_text_mkzmj436',
   'text_mkzmgg0n','text_mkzm2j8','long_text_mkzmjg2b','login_email','login_password',
-  'numeric_mm072xmy','numeric_mm02q2h4','dropdown_mm07km5e','text_mm1j1q79'
+  'numeric_mm072xmy','numeric_mm02q2h4','dropdown_mm07km5e','text_mm1j1q79',
+  'text_mm2nkcmt'
 ];
 
 // ===================== API CALLS =====================
@@ -346,6 +348,101 @@ function loadProps() {
     document.getElementById('statusDot').style.background = '#10b981';
     document.getElementById('statusDot').style.boxShadow = '0 0 6px #10b981';
     document.getElementById('statusText').textContent = allProps.length + ' properties';
+  });
+}
+
+
+function supabaseQuery(table, params) {
+  return fetch(WORKER_URL + '/supabase', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({table: table, params: params})
+  }).then(function(r) { return r.json(); })
+    .catch(function() { return []; });
+}
+
+function getStreamlineData(streamlineId) {
+  if (!streamlineId) return Promise.resolve('');
+  var today = new Date().toISOString().split('T')[0];
+  return Promise.all([
+    supabaseQuery('current_inhouse', {unit_id: 'eq.' + streamlineId, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,adults,children,source,confirmation_id'}),
+    supabaseQuery('active_reservations', {unit_id: 'eq.' + streamlineId, arriving: 'gte.' + today, select: 'guest_first_name,guest_last_name,arriving,departing,adults,children,source,price_nightly,confirmation_id', order: 'arriving.asc', limit: '5'}),
+    supabaseQuery('housekeeping_statuses', {unit_id: 'eq.' + streamlineId, select: 'status_label,updated_at'}),
+    supabaseQuery('guest_reviews', {unit_id: 'eq.' + streamlineId, select: 'guest_name,rating,review_text,review_date', order: 'review_date.desc', limit: '3'})
+  ]).then(function(results) {
+    var inhouse = results[0] || [];
+    var upcoming = results[1] || [];
+    var hk = results[2] || [];
+    var reviews = results[3] || [];
+    var ctx = '';
+
+    if (hk.length > 0) {
+      ctx += '
+--- Housekeeping Status ---
+';
+      ctx += 'Status: ' + (hk[0].status_label || 'Unknown') + '
+';
+      ctx += 'Updated: ' + (hk[0].updated_at || '') + '
+';
+    }
+
+    if (inhouse.length > 0) {
+      ctx += '
+--- Currently In House ---
+';
+      inhouse.forEach(function(g) {
+        ctx += 'Guest: ' + g.guest_first_name + ' ' + g.guest_last_name + '
+';
+        if (g.guest_phone) ctx += 'Phone: ' + g.guest_phone + '
+';
+        if (g.guest_email) ctx += 'Email: ' + g.guest_email + '
+';
+        ctx += 'Check-in: ' + g.arriving + ' | Check-out: ' + g.departing + '
+';
+        ctx += 'Guests: ' + g.adults + ' adults' + (g.children ? ', ' + g.children + ' children' : '') + '
+';
+        ctx += 'Source: ' + (g.source || '') + ' | Confirmation: ' + (g.confirmation_id || '') + '
+';
+      });
+    } else {
+      ctx += '
+--- Currently In House ---
+No guests currently checked in.
+';
+    }
+
+    if (upcoming.length > 0) {
+      ctx += '
+--- Upcoming Reservations ---
+';
+      upcoming.forEach(function(r) {
+        ctx += r.guest_first_name + ' ' + r.guest_last_name + ': ' + r.arriving + ' to ' + r.departing;
+        ctx += ' (' + r.adults + ' adults' + (r.children ? ', ' + r.children + ' children' : '') + ')';
+        ctx += ' via ' + (r.source || 'Direct') + ' @ $' + (r.price_nightly || '?') + '/night
+';
+        ctx += 'Confirmation: ' + (r.confirmation_id || '') + '
+';
+      });
+    } else {
+      ctx += '
+--- Upcoming Reservations ---
+No upcoming reservations found.
+';
+    }
+
+    if (reviews.length > 0) {
+      ctx += '
+--- Recent Guest Reviews ---
+';
+      reviews.forEach(function(r) {
+        ctx += r.guest_name + ' (' + r.review_date + '): ' + r.rating + '/5
+';
+        if (r.review_text) ctx += '"' + r.review_text.slice(0, 200) + '"
+';
+      });
+    }
+
+    return ctx;
   });
 }
 
@@ -417,6 +514,19 @@ function getDetails(prop) {
       }).catch(function() {}));
     }
 
+    // Get Streamline ID from property data
+    var streamlineId = null;
+    allCols.forEach(function(col) {
+      if (col.id === 'text_mm2nkcmt' && col.text && col.text.trim()) {
+        streamlineId = col.text.trim();
+      }
+    });
+
+    promises.push(getStreamlineData(streamlineId).then(function(streamCtx) {
+      if (streamCtx) ctx += '
+' + streamCtx;
+    }));
+
     return Promise.all(promises).then(function() {
       cache[prop.id] = ctx;
       return ctx;
@@ -426,7 +536,7 @@ function getDetails(prop) {
 
 function askClaude(msg, propCtx) {
   var portfolio = allProps.map(function(p) { return p.name + ' (' + p.status + ', ' + p.state + ')'; }).join('\n');
-  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze company policies and SOPs. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\n';
+  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze company policies and SOPs. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\nCRITICAL DATA RULES:\n- You are connected live to Monday.com. If a field is not in the property data provided, it means that field is blank in Monday — say so directly. Example: "The commission field is blank in Monday for this property."\n- NEVER say you do not have access to Monday data or that the connection is broken. You have full access. Empty fields just mean the data has not been filled in yet.\n- NEVER guess or infer a value that is not explicitly in the property data. If it is not there, it is blank in Monday.\n- Do not suggest checking Monday manually — the user is already using this tool to check Monday.\n\n';
   if (propCtx) sys += '--- PROPERTY DATA ---\n' + propCtx + '\n---\n\n';
   if (sopContent) sys += '--- BNB BREEZE SOP ---\n' + sopContent + '\n---\n\n';
   sys += '--- ALL PROPERTIES ---\n' + portfolio + '\n---';
