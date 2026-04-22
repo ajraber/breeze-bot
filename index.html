@@ -288,6 +288,8 @@ var cache = {};
 var hist = [];
 var busy = false;
 var sopContent = '';
+var activeProp = null;
+var activePropCtx = '';
 
 var COL = {
   'location': 'Address',
@@ -574,6 +576,8 @@ function showSuggestions(question, candidates, originalMsg, topic) {
     btn.addEventListener('click', function() {
       // Remove the suggestion message
       msg.remove();
+      activeProp = prop;
+      activePropCtx = '';
       if (topic) {
         send('For ' + prop.name + ': ' + topic);
       } else if (originalMsg) {
@@ -583,6 +587,7 @@ function showSuggestions(question, candidates, originalMsg, topic) {
         busy = true;
         document.getElementById('sendBtn').disabled = true;
         getDetails(prop).then(function(ctx) {
+          activePropCtx = ctx;
           return askClaude(originalMsg, ctx);
         }).then(function(reply) {
           removeTyping();
@@ -752,8 +757,15 @@ function send(text) {
     document.getElementById('chatInput').focus();
     return;
   }
+  // If a new property was found, update active property
+  // If no property found in message, stick with the last active property
   var prop = result.match;
-  var p = prop ? getDetails(prop) : Promise.resolve('');
+  if (prop) {
+    activeProp = prop;
+    activePropCtx = '';
+  }
+  var contextProp = activeProp;
+  var p = contextProp ? (activePropCtx ? Promise.resolve(activePropCtx) : getDetails(contextProp).then(function(ctx) { activePropCtx = ctx; return ctx; })) : Promise.resolve('');
   p.then(function(ctx) {
     return askClaude(text, ctx);
   }).then(function(reply) {
@@ -784,7 +796,7 @@ function quickAsk(topic) {
 document.getElementById('sendBtn').addEventListener('click', function() { send(document.getElementById('chatInput').value.trim()); });
 document.getElementById('chatInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(this.value.trim()); } });
 document.getElementById('chatInput').addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
-document.getElementById('clearBtn').addEventListener('click', function() { hist = []; document.getElementById('chatArea').innerHTML = ''; addMsg('bot', 'Chat cleared. Ask about any property or policy.'); });
+document.getElementById('clearBtn').addEventListener('click', function() { hist = []; activeProp = null; activePropCtx = ''; document.getElementById('chatArea').innerHTML = ''; addMsg('bot', 'Chat cleared. Ask about any property or policy.'); });
 document.getElementById('qa1').addEventListener('click', function() { quickAsk('guest door code, master door code, gate codes, and e-bike codes'); });
 document.getElementById('qa2').addEventListener('click', function() { quickAsk('WiFi network name and password'); });
 document.getElementById('qa3').addEventListener('click', function() { quickAsk('full property address'); });
