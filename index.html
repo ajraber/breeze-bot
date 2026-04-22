@@ -490,12 +490,17 @@ function findProp(text) {
 
   if (scored.length === 0) return {match: null, candidates: []};
   var top = scored[0];
-  if (top.score >= 80 || (scored.length >= 2 && top.score > scored[1].score * 1.5)) {
-    return {match: top.prop, candidates: []};
-  }
-  if (top.score >= 30) {
+  // Only one result above threshold - use it
+  if (scored.length === 1 && top.score >= 30) return {match: top.prop, candidates: []};
+  // Clear winner - score >= 80 or significantly better than next
+  if (top.score >= 80) return {match: top.prop, candidates: []};
+  if (scored.length >= 2 && top.score > scored[1].score * 1.8) return {match: top.prop, candidates: []};
+  // Multiple close results - show suggestions but only if scores are genuinely close
+  if (top.score >= 40 && scored.length >= 2 && scored[1].score >= 25) {
     return {match: null, candidates: scored.slice(0, 3).map(function(s) { return s.prop; })};
   }
+  // Single decent match, no real competition
+  if (top.score >= 30) return {match: top.prop, candidates: []};
   return {match: null, candidates: []};
 }
 
@@ -641,7 +646,7 @@ function send(text) {
     document.getElementById('chatInput').focus();
     return;
   }
-  if (result.match) {
+  if (result.match && (!activeProp || result.match.id !== activeProp.id)) {
     activeProp = result.match;
     activePropCtx = '';
   }
