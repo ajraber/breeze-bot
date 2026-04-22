@@ -707,7 +707,7 @@ function levenshtein(a, b) {
 function findProp(text) {
   // Strip common filler words that aren't part of property names
   var q = text.toLowerCase()
-    .replace(/(what|is|the|for|at|about|tell|me|who|owns|door|code|wifi|address|maintenance|cleaner|pool|trash|pet|parking|summary|info|details|contact)/g, ' ')
+    .replace(/(^|\s)(what|is|the|for|at|about|tell|me|who|owns|door|code|wifi|address|maintenance|cleaner|pool|trash|pet|parking|summary|info|details|contact)(\s|$)/g, ' ')
     .replace(/\s+/g, ' ').trim();
 
   if (!q || q.length < 3) return {match: null, candidates: []};
