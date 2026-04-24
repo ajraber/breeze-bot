@@ -350,136 +350,96 @@ function loadProps() {
 
 function getStreamlineData(sid) {
   if (!sid) return Promise.resolve('');
-  var today = new Date().toISOString().split('T')[0];
   return Promise.all([
+    // Current guests in house
     sbQuery('current_inhouse', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,adults,children,source,confirmation_id'}),
-    sbQuery('active_reservations', {unit_id: 'eq.'+sid, arriving: 'gte.'+today, select: 'guest_first_name,guest_last_name,arriving,departing,adults,children,source,price_nightly,confirmation_id', order: 'arriving.asc', limit: '5'}),
+    // Housekeeping status
     sbQuery('housekeeping_statuses', {unit_id: 'eq.'+sid, select: 'status_label,updated_at'}),
-    sbQuery('guest_reviews', {unit_id: 'eq.'+sid, select: 'guest_name,rating,review_text,review_date', order: 'review_date.desc', limit: '3'})
+    // Recent guest reviews
+    sbQuery('guest_reviews', {unit_id: 'eq.'+sid, select: 'guest_name,rating,review_text,review_date', order: 'review_date.desc', limit: '5'}),
+    // Real bookings only (Booked, Closed/Checked Out, Modified) - no cancellations here by design
+    sbQuery('reservations', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id', order: 'arriving.desc', limit: '30'}),
+    // Cancellations and non-real reservations (Cancelled, Non-Blocked Request, Blocked Request)
+    sbQuery('reservations_archive', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id', order: 'arriving.desc', limit: '20'})
   ]).then(function(res) {
     var inhouse = res[0] || [];
-    var upcoming = res[1] || [];
-    var hk = res[2] || [];
-    var reviews = res[3] || [];
+    var hk = res[1] || [];
+    var reviews = res[2] || [];
+    var bookings = res[3] || [];
+    var archive = res[4] || [];
     var lines = [];
+
     if (hk.length > 0) {
       lines.push('--- Housekeeping Status ---');
       lines.push('Status: ' + (hk[0].status_label || 'Unknown'));
       lines.push('Updated: ' + (hk[0].updated_at || ''));
     }
+
     if (inhouse.length > 0) {
       lines.push('--- Currently In House ---');
       inhouse.forEach(function(g) {
         lines.push('Guest: ' + g.guest_first_name + ' ' + g.guest_last_name);
         if (g.guest_phone) lines.push('Phone: ' + g.guest_phone);
         if (g.guest_email) lines.push('Email: ' + g.guest_email);
-        lines.push('Check-in: ' + g.arriving + ' | Check-out: ' + g.departing);
-        lines.push('Guests: ' + g.adults + ' adults' + (g.children ? ', ' + g.children + ' children' : ''));
-        lines.push('Source: ' + (g.source || '') + ' | Confirmation: ' + (g.confirmation_id || ''));
+        lines.push('Dates: ' + g.arriving + ' to ' + g.departing);
+        lines.push('Source: ' + (g.source || '') + ' | Conf: ' + (g.confirmation_id || ''));
       });
     } else {
       lines.push('--- Currently In House ---');
       lines.push('No guests currently checked in.');
     }
-    if (upcoming.length > 0) {
-      lines.push('--- Upcoming Reservations ---');
-      upcoming.forEach(function(r) {
-        lines.push(r.guest_first_name + ' ' + r.guest_last_name + ': ' + r.arriving + ' to ' + r.departing + ' (' + r.adults + ' adults) via ' + (r.source || 'Direct') + ' @ $' + (r.price_nightly || '?') + '/night');
-        lines.push('Confirmation: ' + (r.confirmation_id || ''));
+
+    if (bookings.length > 0) {
+      lines.push('--- Real Bookings (Booked, Closed/Checked Out, Modified) ---');
+      lines.push('Source table: reservations. These are all real bookings - no cancellations exist here by database design.');
+      bookings.forEach(function(r) {
+        var name = ((r.guest_first_name || '') + ' ' + (r.guest_last_name || '')).trim();
+        var line = r.arriving + ' to ' + r.departing;
+        if (name) line += ' | ' + name;
+        line += ' | ' + (r.booking_status || 'Unknown');
+        if (r.source) line += ' | ' + r.source;
+        if (r.confirmation_id) line += ' | Conf: ' + r.confirmation_id;
+        lines.push(line);
+        if (r.guest_email) lines.push('  Email: ' + r.guest_email);
+        if (r.guest_phone) lines.push('  Phone: ' + r.guest_phone);
       });
     } else {
-      lines.push('--- Upcoming Reservations ---');
-      lines.push('No upcoming reservations found.');
+      lines.push('--- Real Bookings ---');
+      lines.push('No booking records found.');
     }
+
+    if (archive.length > 0) {
+      lines.push('--- Cancelled and Non-Real Reservations ---');
+      lines.push('Source table: reservations_archive. Contains: Cancelled (4726 total across all properties), Non-Blocked Requests (308), Blocked Requests (99). None of these are real bookings.');
+      archive.forEach(function(r) {
+        var name = ((r.guest_first_name || '') + ' ' + (r.guest_last_name || '')).trim();
+        var line = r.arriving + ' to ' + r.departing;
+        if (name) line += ' | ' + name;
+        line += ' | ' + (r.booking_status || 'Unknown');
+        if (r.source) line += ' | ' + r.source;
+        if (r.confirmation_id) line += ' | Conf: ' + r.confirmation_id;
+        lines.push(line);
+        if (r.guest_email) lines.push('  Email: ' + r.guest_email);
+        if (r.guest_phone) lines.push('  Phone: ' + r.guest_phone);
+      });
+    } else {
+      lines.push('--- Cancelled and Non-Real Reservations ---');
+      lines.push('No cancelled or non-real reservations found in archive for this property.');
+    }
+
     if (reviews.length > 0) {
       lines.push('--- Recent Guest Reviews ---');
       reviews.forEach(function(r) {
         lines.push(r.guest_name + ' (' + r.review_date + '): ' + r.rating + '/5 - ' + (r.review_text || '').slice(0, 200));
       });
     }
+
     return lines.join('\n');
   });
 }
-
-function getDetails(prop) {
-  if (cache[prop.id]) return Promise.resolve(cache[prop.id]);
-  var nonRelIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') === -1; });
-  var relIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') !== -1; });
-  var nonRelStr = nonRelIds.map(function(i) { return '"' + i + '"'; }).join(',');
-  var relStr = relIds.map(function(i) { return '"' + i + '"'; }).join(',');
-  var q = '{ items(ids:[' + prop.id + ']) { id name column_values(ids:[' + nonRelStr + ']) { id type text value } board_relation: column_values(ids:[' + relStr + ']) { id type text value ... on BoardRelationValue { linked_items { id name } } } } }';
-  return mq(q).then(function(d) {
-    var item = d.items[0];
-    var ctx = 'Property: ' + item.name + '\n';
-    var ownerIds = [];
-    var contractorIds = [];
-    var streamlineId = null;
-    var allCols = (item.column_values || []).concat(item.board_relation || []);
-    allCols.forEach(function(col) {
-      var val = col.text;
-      if (col.type === 'location' && col.value) {
-        try { var loc = JSON.parse(col.value); val = loc.address || ''; } catch(e) {}
-      }
-      if (col.type === 'board_relation') {
-        try {
-          if (col.linked_items && col.linked_items.length > 0) {
-            val = col.linked_items.map(function(l) { return l.name || ''; }).filter(Boolean).join(', ');
-            col.linked_items.forEach(function(l) {
-              if (col.id === 'board_relation_mkza3601') ownerIds.push(l.id);
-              else contractorIds.push(l.id);
-            });
-          } else if (col.text && col.text.trim()) { val = col.text; }
-          else { val = ''; }
-        } catch(e) {}
-      }
-      if (col.id === 'text_mm2nkcmt' && col.text && col.text.trim()) {
-        streamlineId = col.text.trim();
-      }
-      if (val && val.trim() && COL[col.id]) ctx += COL[col.id] + ': ' + val + '\n';
-    });
-    var promises = [];
-    if (ownerIds.length > 0) {
-      var oq = '{ items(ids:[' + ownerIds.join(',') + ']) { name column_values(ids:["email_mkz4x08v","phone_mkz48h6n","text_mkz4qbvr","text_mkz4y0y9","phone_mm15r964","email_mkzdvsyb","color_mm1551ca"]) { id text } } }';
-      promises.push(mq(oq).then(function(d) {
-        if (!d.items) return;
-        d.items.forEach(function(owner) {
-          ctx += '\n--- Owner: ' + owner.name + ' ---\n';
-          var map = {'email_mkz4x08v':'Email','phone_mkz48h6n':'Phone','text_mkz4qbvr':'Company','text_mkz4y0y9':'Address','phone_mm15r964':'Secondary Phone','email_mkzdvsyb':'Secondary Email','color_mm1551ca':'Commission %'};
-          owner.column_values.forEach(function(c) {
-            if (c.text && c.text.trim() && map[c.id]) ctx += map[c.id] + ': ' + c.text + '\n';
-          });
-        });
-      }).catch(function() {}));
-    }
-    if (contractorIds.length > 0) {
-      var uniq = contractorIds.filter(function(id, i) { return contractorIds.indexOf(id) === i; });
-      var cq = '{ items(ids:[' + uniq.join(',') + ']) { name column_values(ids:["phone_mm0zzms2","email_mm0zcevg","text_mm0zgeqm","color_mm1325pz","long_text_mm0z1pnm"]) { id text } } }';
-      promises.push(mq(cq).then(function(d) {
-        if (!d.items) return;
-        d.items.forEach(function(con) {
-          ctx += '\n--- Contractor: ' + con.name + ' ---\n';
-          var map = {'phone_mm0zzms2':'Phone','email_mm0zcevg':'Email','text_mm0zgeqm':'Company','color_mm1325pz':'Trade','long_text_mm0z1pnm':'Notes'};
-          con.column_values.forEach(function(c) {
-            if (c.text && c.text.trim() && map[c.id]) ctx += map[c.id] + ': ' + c.text + '\n';
-          });
-        });
-      }).catch(function() {}));
-    }
-    if (streamlineId) {
-      promises.push(getStreamlineData(streamlineId).then(function(streamCtx) {
-        if (streamCtx) ctx += '\n--- Streamline Live Data ---\n' + streamCtx + '\n';
-      }).catch(function() {}));
-    }
-    return Promise.all(promises).then(function() {
-      cache[prop.id] = ctx;
-      return ctx;
-    });
-  });
-}
-
 function askClaude(msg, propCtx) {
   var portfolio = allProps.map(function(p) { return p.name + ' (' + p.status + ', ' + p.state + ')'; }).join('\n');
-  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze SOPs and policies. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\nCRITICAL DATA RULES:\n- You are connected live to Monday.com and Streamline via Supabase. If a field is not in the property data provided, say it is blank in Monday.\n- NEVER say you do not have access to Monday data. Empty fields just mean the data has not been filled in yet.\n- NEVER guess or infer a value that is not explicitly in the property data.\n- Do not suggest checking Monday manually - the user is already using this tool to check Monday.\n';
+  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze SOPs and policies. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\nCRITICAL DATA RULES:\n- You are connected live to Monday.com and Streamline via Supabase. You have access to all reservation data for each property. The database has a clean physical split: the reservations table contains ONLY real bookings (Booked, Closed/Checked Out, Modified) - cancellations are physically excluded by design. The reservations_archive table contains ONLY non-real records: Cancelled (the vast majority), Non-Blocked Requests, and Blocked Requests. There are zero cancellations in reservations and zero real bookings in reservations_archive. Both tables are provided in the property context. For revenue or booking counts use data from the real bookings section. For cancellation analysis use data from the archive section. The booking_status field labels each row clearly. If a field is not in the property data provided, say it is blank in Monday.\n- NEVER say you do not have access to Monday data. Empty fields just mean the data has not been filled in yet.\n- NEVER guess or infer a value that is not explicitly in the property data.\n- Do not suggest checking Monday manually - the user is already using this tool to check Monday.\n';
   if (propCtx) sys += '\n--- PROPERTY DATA ---\n' + propCtx + '\n---\n';
   if (sopContent) sys += '\n--- BNB BREEZE SOP ---\n' + sopContent + '\n---\n';
   sys += '\n--- ALL PROPERTIES ---\n' + portfolio + '\n---';
