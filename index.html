@@ -8,7 +8,7 @@
 <style>
 :root{--bg:#0a0c10;--surface:#111318;--surface2:#181c23;--surface3:#1e2330;--border:#252b38;--border2:#2f3847;--text:#e4e9f0;--text2:#8896aa;--text3:#4d5a6e;--accent:#00aaff;--accent-dim:rgba(0,170,255,0.12);--accent-border:rgba(0,170,255,0.25);--green:#10b981;--red:#ef4444;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
 .pin-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:20px;}
 .pin-logo{height:52px;width:auto;filter:brightness(0) invert(1) sepia(1) saturate(5) hue-rotate(180deg);opacity:0.9;}
 .pin-title{font-size:20px;font-weight:600;color:var(--text);}
@@ -78,6 +78,26 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .send-btn:hover{opacity:0.85;}
 .send-btn:disabled{background:var(--surface3);color:var(--text3);cursor:not-allowed;}
 .hint{font-size:11px;color:var(--text3);text-align:center;margin-top:8px;font-family:'DM Mono',monospace;max-width:800px;margin-left:auto;margin-right:auto;}
+
+@supports (height: 100dvh) {
+  body { height: 100dvh; }
+}
+@media (max-width: 600px) {
+  .header{padding:10px 14px;}
+  .quick-actions{padding:8px 10px;gap:5px;}
+  .qa-btn{padding:4px 10px;font-size:11px;}
+  .chat-area{padding:16px 14px;}
+  .input-area{padding:10px 14px 12px;}
+  .input-wrap{padding:8px 10px;}
+  .chat-input{font-size:16px;}
+  .bubble{font-size:13px;}
+  .welcome{padding:30px 16px;}
+  .welcome h2{font-size:18px;}
+  .examples{grid-template-columns:1fr 1fr;gap:6px;}
+  .example{font-size:12px;padding:10px 10px;}
+  .hint{display:none;}
+  .logo-name{font-size:13px;}
+}
 </style>
 </head>
 <body>
@@ -351,22 +371,15 @@ function loadProps() {
 function getStreamlineData(sid) {
   if (!sid) return Promise.resolve('');
   return Promise.all([
-    // Current guests in house
     sbQuery('current_inhouse', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,adults,children,source,confirmation_id'}),
-    // Housekeeping status
     sbQuery('housekeeping_statuses', {unit_id: 'eq.'+sid, select: 'status_label,updated_at'}),
-    // Recent guest reviews
     sbQuery('guest_reviews', {unit_id: 'eq.'+sid, select: 'guest_name,rating,review_text,review_date', order: 'review_date.desc', limit: '5'}),
-    // Real bookings only (Booked, Closed/Checked Out, Modified) - no cancellations here by design
-    sbQuery('reservations', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id', order: 'arriving.desc', limit: '30'}),
-    // Cancellations and non-real reservations (Cancelled, Non-Blocked Request, Blocked Request)
-    sbQuery('reservations_archive', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id', order: 'arriving.desc', limit: '20'})
+    sbQuery('reservations_all_history', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id,source_table,adults,children,price_nightly,price_total,days_number', order: 'arriving.desc', limit: '60'})
   ]).then(function(res) {
     var inhouse = res[0] || [];
     var hk = res[1] || [];
     var reviews = res[2] || [];
-    var bookings = res[3] || [];
-    var archive = res[4] || [];
+    var allHistory = res[3] || [];
     var lines = [];
 
     if (hk.length > 0) {
@@ -382,6 +395,7 @@ function getStreamlineData(sid) {
         if (g.guest_phone) lines.push('Phone: ' + g.guest_phone);
         if (g.guest_email) lines.push('Email: ' + g.guest_email);
         lines.push('Dates: ' + g.arriving + ' to ' + g.departing);
+        if (g.adults) lines.push('Guests: ' + g.adults + ' adults' + (g.children ? ', ' + g.children + ' children' : ''));
         lines.push('Source: ' + (g.source || '') + ' | Conf: ' + (g.confirmation_id || ''));
       });
     } else {
@@ -389,42 +403,26 @@ function getStreamlineData(sid) {
       lines.push('No guests currently checked in.');
     }
 
-    if (bookings.length > 0) {
-      lines.push('--- Real Bookings (Booked, Closed/Checked Out, Modified) ---');
-      lines.push('Source table: reservations. These are all real bookings - no cancellations exist here by database design.');
-      bookings.forEach(function(r) {
+    if (allHistory.length > 0) {
+      lines.push('--- Full Reservation History (most recent first) ---');
+      lines.push('source_table: active = real booking (Booked/Closed/Modified). source_table: archive = non-real (Cancelled/Non-Blocked Request/Blocked Request).');
+      allHistory.forEach(function(r) {
         var name = ((r.guest_first_name || '') + ' ' + (r.guest_last_name || '')).trim();
-        var line = r.arriving + ' to ' + r.departing;
+        var line = '[' + (r.source_table || '?').toUpperCase() + '] ' + r.arriving + ' to ' + r.departing;
         if (name) line += ' | ' + name;
         line += ' | ' + (r.booking_status || 'Unknown');
         if (r.source) line += ' | ' + r.source;
+        if (r.price_nightly) line += ' | $' + r.price_nightly + '/night';
+        if (r.days_number) line += ' | ' + r.days_number + ' nights';
         if (r.confirmation_id) line += ' | Conf: ' + r.confirmation_id;
         lines.push(line);
+        if (r.adults) lines.push('  Guests: ' + r.adults + ' adults' + (r.children ? ', ' + r.children + ' children' : ''));
         if (r.guest_email) lines.push('  Email: ' + r.guest_email);
         if (r.guest_phone) lines.push('  Phone: ' + r.guest_phone);
       });
     } else {
-      lines.push('--- Real Bookings ---');
-      lines.push('No booking records found.');
-    }
-
-    if (archive.length > 0) {
-      lines.push('--- Cancelled and Non-Real Reservations ---');
-      lines.push('Source table: reservations_archive. Contains: Cancelled (4726 total across all properties), Non-Blocked Requests (308), Blocked Requests (99). None of these are real bookings.');
-      archive.forEach(function(r) {
-        var name = ((r.guest_first_name || '') + ' ' + (r.guest_last_name || '')).trim();
-        var line = r.arriving + ' to ' + r.departing;
-        if (name) line += ' | ' + name;
-        line += ' | ' + (r.booking_status || 'Unknown');
-        if (r.source) line += ' | ' + r.source;
-        if (r.confirmation_id) line += ' | Conf: ' + r.confirmation_id;
-        lines.push(line);
-        if (r.guest_email) lines.push('  Email: ' + r.guest_email);
-        if (r.guest_phone) lines.push('  Phone: ' + r.guest_phone);
-      });
-    } else {
-      lines.push('--- Cancelled and Non-Real Reservations ---');
-      lines.push('No cancelled or non-real reservations found in archive for this property.');
+      lines.push('--- Full Reservation History ---');
+      lines.push('No reservation records found for this property.');
     }
 
     if (reviews.length > 0) {
@@ -439,7 +437,7 @@ function getStreamlineData(sid) {
 }
 function askClaude(msg, propCtx) {
   var portfolio = allProps.map(function(p) { return p.name + ' (' + p.status + ', ' + p.state + ')'; }).join('\n');
-  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze SOPs and policies. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\nCRITICAL DATA RULES:\n- You are connected live to Monday.com and Streamline via Supabase. You have access to all reservation data for each property. The database has a clean physical split: the reservations table contains ONLY real bookings (Booked, Closed/Checked Out, Modified) - cancellations are physically excluded by design. The reservations_archive table contains ONLY non-real records: Cancelled (the vast majority), Non-Blocked Requests, and Blocked Requests. There are zero cancellations in reservations and zero real bookings in reservations_archive. Both tables are provided in the property context. For revenue or booking counts use data from the real bookings section. For cancellation analysis use data from the archive section. The booking_status field labels each row clearly. If a field is not in the property data provided, say it is blank in Monday.\n- NEVER say you do not have access to Monday data. Empty fields just mean the data has not been filled in yet.\n- NEVER guess or infer a value that is not explicitly in the property data.\n- Do not suggest checking Monday manually - the user is already using this tool to check Monday.\n';
+  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze SOPs and policies. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\nCRITICAL DATA RULES:\\n- You are connected live to Monday.com and Streamline via Supabase. Full reservation history is provided via reservations_all_history which combines all types. Each row has source_table: active = real booking (Booked, Closed/Checked Out, Modified). source_table: archive = non-real (Cancelled, Non-Blocked Request, Blocked Request). The booking_status field gives the plain-English label. For revenue or booking counts only use active rows. For cancellation analysis use archive rows.\\n- If a field is not in the property data provided, say it is blank in Monday.\\n- NEVER say you do not have access to Monday data. Empty fields just mean the data has not been filled in yet.\\n- NEVER guess or infer a value that is not explicitly in the property data.\\n- Do not suggest checking Monday manually - the user is already using this tool to check Monday.\n';
   if (propCtx) sys += '\n--- PROPERTY DATA ---\n' + propCtx + '\n---\n';
   if (sopContent) sys += '\n--- BNB BREEZE SOP ---\n' + sopContent + '\n---\n';
   sys += '\n--- ALL PROPERTIES ---\n' + portfolio + '\n---';
