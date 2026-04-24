@@ -368,6 +368,82 @@ function loadProps() {
   });
 }
 
+function getDetails(prop) {
+  if (cache[prop.id]) return Promise.resolve(cache[prop.id]);
+  var nonRelIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') === -1; });
+  var relIds = ALL_IDS.filter(function(i) { return i.indexOf('board_relation') !== -1; });
+  var nonRelStr = nonRelIds.map(function(i) { return '"' + i + '"'; }).join(',');
+  var relStr = relIds.map(function(i) { return '"' + i + '"'; }).join(',');
+  var q = '{ items(ids:[' + prop.id + ']) { id name column_values(ids:[' + nonRelStr + ']) { id type text value } board_relation: column_values(ids:[' + relStr + ']) { id type text value ... on BoardRelationValue { linked_items { id name } } } } }';
+  return mq(q).then(function(d) {
+    var item = d.items[0];
+    var ctx = 'Property: ' + item.name + '\n';
+    var ownerIds = [];
+    var contractorIds = [];
+    var streamlineId = null;
+    var allCols = (item.column_values || []).concat(item.board_relation || []);
+    allCols.forEach(function(col) {
+      var val = col.text;
+      if (col.type === 'location' && col.value) {
+        try { var loc = JSON.parse(col.value); val = loc.address || ''; } catch(e) {}
+      }
+      if (col.type === 'board_relation') {
+        try {
+          if (col.linked_items && col.linked_items.length > 0) {
+            val = col.linked_items.map(function(l) { return l.name || ''; }).filter(Boolean).join(', ');
+            col.linked_items.forEach(function(l) {
+              if (col.id === 'board_relation_mkza3601') ownerIds.push(l.id);
+              else contractorIds.push(l.id);
+            });
+          } else if (col.text && col.text.trim()) { val = col.text; }
+          else { val = ''; }
+        } catch(e) {}
+      }
+      if (col.id === 'text_mm2nkcmt' && col.text && col.text.trim()) {
+        streamlineId = col.text.trim();
+      }
+      if (val && val.trim() && COL[col.id]) ctx += COL[col.id] + ': ' + val + '\n';
+    });
+    var promises = [];
+    if (ownerIds.length > 0) {
+      var oq = '{ items(ids:[' + ownerIds.join(',') + ']) { name column_values(ids:["email_mkz4x08v","phone_mkz48h6n","text_mkz4qbvr","text_mkz4y0y9","phone_mm15r964","email_mkzdvsyb","color_mm1551ca"]) { id text } } }';
+      promises.push(mq(oq).then(function(d) {
+        if (!d.items) return;
+        d.items.forEach(function(owner) {
+          ctx += '\n--- Owner: ' + owner.name + ' ---\n';
+          var map = {'email_mkz4x08v':'Email','phone_mkz48h6n':'Phone','text_mkz4qbvr':'Company','text_mkz4y0y9':'Address','phone_mm15r964':'Secondary Phone','email_mkzdvsyb':'Secondary Email','color_mm1551ca':'Commission %'};
+          owner.column_values.forEach(function(c) {
+            if (c.text && c.text.trim() && map[c.id]) ctx += map[c.id] + ': ' + c.text + '\n';
+          });
+        });
+      }).catch(function() {}));
+    }
+    if (contractorIds.length > 0) {
+      var uniq = contractorIds.filter(function(id, i) { return contractorIds.indexOf(id) === i; });
+      var cq = '{ items(ids:[' + uniq.join(',') + ']) { name column_values(ids:["phone_mm0zzms2","email_mm0zcevg","text_mm0zgeqm","color_mm1325pz","long_text_mm0z1pnm"]) { id text } } }';
+      promises.push(mq(cq).then(function(d) {
+        if (!d.items) return;
+        d.items.forEach(function(con) {
+          ctx += '\n--- Contractor: ' + con.name + ' ---\n';
+          var map = {'phone_mm0zzms2':'Phone','email_mm0zcevg':'Email','text_mm0zgeqm':'Company','color_mm1325pz':'Trade','long_text_mm0z1pnm':'Notes'};
+          con.column_values.forEach(function(c) {
+            if (c.text && c.text.trim() && map[c.id]) ctx += map[c.id] + ': ' + c.text + '\n';
+          });
+        });
+      }).catch(function() {}));
+    }
+    if (streamlineId) {
+      promises.push(getStreamlineData(streamlineId).then(function(streamCtx) {
+        if (streamCtx) ctx += '\n--- Streamline Live Data ---\n' + streamCtx + '\n';
+      }).catch(function() {}));
+    }
+    return Promise.all(promises).then(function() {
+      cache[prop.id] = ctx;
+      return ctx;
+    });
+  });
+}
+
 function getStreamlineData(sid) {
   if (!sid) return Promise.resolve('');
   return Promise.all([
