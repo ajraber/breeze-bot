@@ -447,15 +447,25 @@ function getDetails(prop) {
 function getStreamlineData(sid) {
   if (!sid) return Promise.resolve('');
   return Promise.all([
+    // Currently in house
     sbQuery('current_inhouse', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,adults,children,source,confirmation_id'}),
+    // Latest housekeeping status
     sbQuery('housekeeping_statuses', {unit_id: 'eq.'+sid, select: 'status_label,updated_at'}),
-    sbQuery('guest_reviews', {unit_id: 'eq.'+sid, select: 'guest_name,rating,review_text,review_date', order: 'review_date.desc', limit: '5'}),
-    sbQuery('reservations_all_history', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id,source_table,adults,children,price_nightly,price_total,days_number', order: 'arriving.desc', limit: '60'})
+    // All guest reviews
+    sbQuery('guest_reviews', {unit_id: 'eq.'+sid, select: 'guest_name,rating,review_text,review_date', order: 'review_date.desc', limit: '50'}),
+    // Full reservation history - everything for this property, no filters
+    sbQuery('reservations_all_history', {unit_id: 'eq.'+sid, select: 'guest_first_name,guest_last_name,guest_email,guest_phone,arriving,departing,booking_status,status_id,source,confirmation_id,source_table,adults,children,pets,price_nightly,price_total,days_number,modified_at,client_comments', order: 'arriving.desc', limit: '600'}),
+    // Any reservation flags for this unit's reservations
+    sbQuery('reservation_flags', {unit_id: 'eq.'+sid, select: 'confirmation_id,flag_name,flag_value,created_at', order: 'created_at.desc', limit: '50'}),
+    // Price detail for active reservations
+    sbQuery('reservation_price_details', {unit_id: 'eq.'+sid, select: 'confirmation_id,price_type,amount', limit: '200'})
   ]).then(function(res) {
     var inhouse = res[0] || [];
     var hk = res[1] || [];
     var reviews = res[2] || [];
-    var allHistory = res[3] || [];
+    var allRes = res[3] || [];
+    var flags = res[4] || [];
+    var priceDetails = res[5] || [];
     var lines = [];
 
     if (hk.length > 0) {
@@ -479,32 +489,58 @@ function getStreamlineData(sid) {
       lines.push('No guests currently checked in.');
     }
 
-    if (allHistory.length > 0) {
-      lines.push('--- Full Reservation History (most recent first) ---');
-      lines.push('source_table: active = real booking (Booked/Closed/Modified). source_table: archive = non-real (Cancelled/Non-Blocked Request/Blocked Request).');
-      allHistory.forEach(function(r) {
+    if (allRes.length > 0) {
+      // Split into active/archive for easier interpretation by Claude
+      var active = allRes.filter(function(r) { return r.source_table === 'active'; });
+      var archive = allRes.filter(function(r) { return r.source_table === 'archive'; });
+
+      lines.push('--- Full Reservation History (' + allRes.length + ' total records) ---');
+      lines.push('Active bookings (real): ' + active.length + ' | Archive (cancelled/blocks/requests): ' + archive.length);
+      lines.push('Use source_table field to filter. booking_status gives plain-English label.');
+      lines.push('');
+
+      allRes.forEach(function(r) {
         var name = ((r.guest_first_name || '') + ' ' + (r.guest_last_name || '')).trim();
-        var line = '[' + (r.source_table || '?').toUpperCase() + '] ' + r.arriving + ' to ' + r.departing;
+        var tag = (r.source_table || '?').toUpperCase();
+        var line = '[' + tag + '] ' + r.arriving + ' to ' + r.departing;
         if (name) line += ' | ' + name;
         line += ' | ' + (r.booking_status || 'Unknown');
         if (r.source) line += ' | ' + r.source;
-        if (r.price_nightly) line += ' | $' + r.price_nightly + '/night';
-        if (r.days_number) line += ' | ' + r.days_number + ' nights';
-        if (r.confirmation_id) line += ' | Conf: ' + r.confirmation_id;
+        if (r.days_number) line += ' | ' + r.days_number + 'n';
+        if (r.price_total) line += ' | $' + r.price_total;
+        else if (r.price_nightly) line += ' | $' + r.price_nightly + '/n';
+        if (r.confirmation_id) line += ' | ' + r.confirmation_id;
         lines.push(line);
-        if (r.adults) lines.push('  Guests: ' + r.adults + ' adults' + (r.children ? ', ' + r.children + ' children' : ''));
+        if (r.adults || r.children || r.pets) {
+          var g = [];
+          if (r.adults) g.push(r.adults + ' adults');
+          if (r.children) g.push(r.children + ' children');
+          if (r.pets) g.push(r.pets + ' pets');
+          if (g.length) lines.push('  Party: ' + g.join(', '));
+        }
         if (r.guest_email) lines.push('  Email: ' + r.guest_email);
         if (r.guest_phone) lines.push('  Phone: ' + r.guest_phone);
+        if (r.client_comments) lines.push('  Notes: ' + r.client_comments.slice(0, 200));
       });
     } else {
       lines.push('--- Full Reservation History ---');
       lines.push('No reservation records found for this property.');
     }
 
+    if (flags.length > 0) {
+      lines.push('');
+      lines.push('--- Reservation Flags ---');
+      flags.forEach(function(f) {
+        lines.push(f.confirmation_id + ' | ' + (f.flag_name || '') + ': ' + (f.flag_value || '') + ' | ' + (f.created_at || ''));
+      });
+    }
+
     if (reviews.length > 0) {
-      lines.push('--- Recent Guest Reviews ---');
+      lines.push('');
+      lines.push('--- Guest Reviews (' + reviews.length + ' total) ---');
       reviews.forEach(function(r) {
-        lines.push(r.guest_name + ' (' + r.review_date + '): ' + r.rating + '/5 - ' + (r.review_text || '').slice(0, 200));
+        lines.push(r.guest_name + ' (' + r.review_date + '): ' + r.rating + '/5');
+        if (r.review_text) lines.push('  "' + r.review_text.slice(0, 300) + '"');
       });
     }
 
@@ -513,10 +549,38 @@ function getStreamlineData(sid) {
 }
 function askClaude(msg, propCtx) {
   var portfolio = allProps.map(function(p) { return p.name + ' (' + p.status + ', ' + p.state + ')'; }).join('\n');
-  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental company with ' + allProps.length + ' properties.\n\nYou are deeply trained on BNB Breeze SOPs and policies. Every response is filtered through company knowledge. Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. When policy is relevant, apply it.\n\nCRITICAL DATA RULES:\\n- You are connected live to Monday.com and Streamline via Supabase. Full reservation history is provided via reservations_all_history which combines all types. Each row has source_table: active = real booking (Booked, Closed/Checked Out, Modified). source_table: archive = non-real (Cancelled, Non-Blocked Request, Blocked Request). The booking_status field gives the plain-English label. For revenue or booking counts only use active rows. For cancellation analysis use archive rows.\\n- If a field is not in the property data provided, say it is blank in Monday.\\n- NEVER say you do not have access to Monday data. Empty fields just mean the data has not been filled in yet.\\n- NEVER guess or infer a value that is not explicitly in the property data.\\n- Do not suggest checking Monday manually - the user is already using this tool to check Monday.\n';
-  if (propCtx) sys += '\n--- PROPERTY DATA ---\n' + propCtx + '\n---\n';
-  if (sopContent) sys += '\n--- BNB BREEZE SOP ---\n' + sopContent + '\n---\n';
-  sys += '\n--- ALL PROPERTIES ---\n' + portfolio + '\n---';
+
+  var sys = 'You are Breeze Bot, the internal assistant for BNB Breeze, a short-term rental property management company with ' + allProps.length + ' managed properties. Your audience is the internal BNB Breeze team (operations, reservations, homeowner relations, cleaning, maintenance).\n\n';
+
+  sys += '=== YOUR CAPABILITIES (YOU ALWAYS HAVE ALL OF THESE) ===\n';
+  sys += 'You have live, simultaneous access to every one of these data sources on every single response. You are never limited to just one source. Combine them freely:\n\n';
+  sys += '1. MONDAY.COM - Live property database. Every property record including door codes, WiFi, addresses, pool info, trash day, emergency contacts, house rules, checkout instructions, and all operational fields. Also linked owner contacts (phone, email, commission) and vendor contacts (HVAC, plumber, electrician, cleaner, pool service, lawn care, pest control, snow removal).\n';
+  sys += '2. SUPABASE RESERVATION DATABASE - Complete mirror of all Streamline reservation data for this property. Every reservation ever created for the current property is available to you in the property context: all dates, past and future, real bookings and cancellations, owner blocks, maintenance blocks, inquiries, blocked requests. You also have guest reviews, housekeeping status, reservation flags, and price details. Nothing is filtered out. If a user asks about a specific reservation, confirmation ID, or date range, search the provided reservation history - it is all there. Never say you cannot see a reservation.\n';
+  sys += '3. BNB BREEZE SOP & POLICIES - Full company SOP plus Job Descriptions, Onboarding, Offboarding, WAV Initiative, Team Flow Chart, and additional reference docs. All loaded fresh every session.\n';
+  sys += '4. LIVE HOUSEKEEPING STATUS - Current clean state of any property with a Streamline ID.\n';
+  sys += '5. GUEST REVIEWS - Recent guest feedback and ratings.\n\n';
+
+  sys += '=== HOW TO USE THESE SOURCES ===\n';
+  sys += '- NEVER tell the user you cannot access Monday, Streamline, or Supabase data. You can. If a field appears empty, say the field is blank in Monday (not filled in yet), not that you lack access.\n';
+  sys += '- NEVER say reservations are not available. If you do not see a specific reservation in the context, say you see reservations in a certain window and offer to look up a specific date range or confirmation number.\n';
+  sys += '- COMBINE sources naturally. A pool question should pull the pool info from Monday AND apply the SOP heating policy. A guest question should pull Streamline reservation data AND check Monday for property-specific context.\n';
+  sys += '- Reservation data interpretation: source_table=active means a real booking (Booked, Closed/Checked Out, Modified). source_table=archive means non-real (Cancelled, Non-Blocked Request, Blocked Request). Use the booking_status field for the plain-English label.\n';
+  sys += '- NEVER invent data. If a specific value is not in the provided context, say so directly.\n';
+  sys += '- NEVER suggest the user check Monday or Streamline manually - that is what YOU are doing for them.\n\n';
+
+  sys += '=== RESPONSE STYLE ===\n';
+  sys += 'Answer ONLY what was asked. Be brief and direct. Bold key values with **value**. No preamble, no summary of what you are about to do. Just answer.\n\n';
+
+  if (propCtx) {
+    sys += '=== CURRENT PROPERTY CONTEXT (live data) ===\n' + propCtx + '\n=== END PROPERTY CONTEXT ===\n\n';
+  }
+
+  if (sopContent) {
+    sys += '=== BNB BREEZE SOP & KNOWLEDGE BASE ===\n' + sopContent + '\n=== END SOP ===\n\n';
+  }
+
+  sys += '=== ALL 252 PROPERTIES IN PORTFOLIO ===\n' + portfolio + '\n=== END PORTFOLIO ===';
+
   hist.push({role: 'user', content: msg});
   return fetch(WORKER_URL + '/anthropic', {
     method: 'POST',
@@ -532,7 +596,6 @@ function askClaude(msg, propCtx) {
     return reply;
   });
 }
-
 // ===================== PROPERTY MATCHING =====================
 function levenshtein(a, b) {
   var m = a.length, n = b.length, dp = [], i, j;
